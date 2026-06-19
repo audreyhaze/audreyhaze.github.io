@@ -1,5 +1,5 @@
 let tlds = [];
-const TLD_FILE_PATH = "tlds-alpha-by-domain.txt";
+const TLD_FILE_PATH = "assets/tlds-alpha-by-domain.txt";
 fetch(TLD_FILE_PATH)
   .then(res => {
     if (!res.ok) throw new Error('File not found');
@@ -27,6 +27,12 @@ function cleanString(str) {
     .replace(/[:\/\?#\[\]@!$&'()*+,;=\s"<>\\^`{|}]/g, '');
 }
 
+function getFuzziness() {
+  const slider = document.getElementById('fuzzy');
+  const n = slider ? parseInt(slider.value, 10) : 1;
+  return Math.max(1, Math.min(5, isNaN(n) ? 1 : n));
+}
+
 function findSplits(str) {
   const results = [];
   const lower = str.toLowerCase();
@@ -42,43 +48,50 @@ function findSplits(str) {
   return results;
 }
 
-function findFuzzySplits(str, exactMatches) {
+function findFuzzySplits(str, exactMatches, fuzziness) {
   const results = [];
   const lower = str.toLowerCase();
   const exactTlds = new Set(exactMatches.map(m => m.slice(m.lastIndexOf('.') + 1)));
+  const n = Math.max(1, parseInt(fuzziness, 10) || 1);
 
   for (const tld of tlds) {
     if (exactTlds.has(tld)) continue;
 
-    // remove a character
-    if (tld.length + 1 < lower.length) {
-      const suffix = lower.slice(lower.length - (tld.length + 1));
-      const base = lower.slice(0, lower.length - (tld.length + 1));
-      const extraChar = suffix.slice(tld.length);
+    // remove k characters (input has k extra chars after the tld)
+    for (let k = 1; k <= n; k++) {
+      const totalLen = tld.length + k;
+      if (totalLen >= lower.length) continue;
 
-      if (base.length > 0 && suffix.slice(0, tld.length) === tld) {
-        results.push({ type: 'extra', base, tld, extraChar });
+      const suffix = lower.slice(lower.length - totalLen);
+      const base = lower.slice(0, lower.length - totalLen);
+      const tldPart = suffix.slice(0, tld.length);
+      const extraChars = suffix.slice(tld.length);
+
+      if (base.length > 0 && tldPart === tld) {
+        results.push({ type: 'extra', base, tld, extraChars, k });
       }
     }
 
-    // add extra character
-    if (tld.length >= 2) {
-      const tldPrefix = tld.slice(0, -1);
-      const missingChar = tld.slice(-1);
+    // add k characters (input is missing the last k chars of the tld)
+    for (let k = 1; k <= n; k++) {
+      if (tld.length - k < 1) continue;
+      const tldPrefix = tld.slice(0, tld.length - k);
+      const missingChars = tld.slice(tld.length - k);
 
       if (tldPrefix.length < lower.length) {
         const base = lower.slice(0, lower.length - tldPrefix.length);
         const suffix = lower.slice(lower.length - tldPrefix.length);
 
         if (base.length > 0 && suffix === tldPrefix) {
-          results.push({ type: 'missing', base, tldPrefix, missingChar });
+          results.push({ type: 'missing', base, tldPrefix, missingChars, k });
         }
       }
     }
   }
 
-  //reorder
+  // reorder: smallest edit distance first, then 'extra' before 'missing'
   results.sort((a, b) => {
+    if (a.k !== b.k) return a.k - b.k;
     if (a.type === b.type) return 0;
     return a.type === 'extra' ? -1 : 1;
   });
@@ -120,16 +133,17 @@ function run() {
   }
 
   if (outputMatch) {
-    const fuzzyMatches = findFuzzySplits(cleaned, matches);
+    const fuzziness = getFuzziness();
+    const fuzzyMatches = findFuzzySplits(cleaned, matches, fuzziness);
     if (fuzzyMatches.length === 0) {
-      outputMatch.textContent = 'No close (1-character) TLD matches found.';
+      outputMatch.textContent = `No close (up to ${fuzziness}-character) TLD matches found.`;
     } else {
       outputMatch.innerHTML = fuzzyMatches
         .map(m => {
           if (m.type === 'missing') {
-            return `${m.base}.<span class="tld">${m.tldPrefix}<span class="extrachar">${m.missingChar}</span></span>`;
+            return `${m.base}.<span class="tld">${m.tldPrefix}<span class="extrachar">${m.missingChars}</span></span>`;
           } else {
-            return `${m.base}.<span class="tld">${m.tld}</span><span class="minuschar">${m.extraChar}</span>`;
+            return `${m.base}.<span class="tld">${m.tld}</span><span class="minuschar">${m.extraChars}</span>`;
           }
         })
         .join('\n');
@@ -160,3 +174,27 @@ document.getElementById('toggleBtn').addEventListener('click', function () {
   wrapper.classList.toggle('collapse');
   btn.textContent = wrapper.classList.contains('collapse') ? '>' : 'v';
 });
+
+function updateFuzzyCount() {
+  const slider = document.getElementById('fuzzy');
+  const countEl = document.getElementById('fuzzycount');
+  if (slider && countEl) {
+    const val = parseInt(slider.value, 10) || 1;
+    const count = (val);
+    countEl.textContent = count;
+  }
+}
+
+const fuzzySlider = document.getElementById('fuzzy');
+if (fuzzySlider) {
+  fuzzySlider.addEventListener('input', function () {
+    updateFuzzyCount();
+    const inputEl = document.getElementById('inputString');
+    if (inputEl && inputEl.value.trim().length > 0) {
+      run();
+    }
+  });
+}
+
+// initialize on page load
+updateFuzzyCount();
