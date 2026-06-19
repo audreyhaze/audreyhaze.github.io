@@ -1,5 +1,5 @@
 let tlds = [];
-const TLD_FILE_PATH = "assets/tlds-alpha-by-domain.txt";
+const TLD_FILE_PATH = "tlds-alpha-by-domain.txt";
 fetch(TLD_FILE_PATH)
   .then(res => {
     if (!res.ok) throw new Error('File not found');
